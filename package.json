@@ -4,7 +4,7 @@
   "title": "GitHub Org Browser",
   "description": "Browse repositories across your GitHub organizations and personal account",
   "icon": "extension-icon.png",
-  "author": "streetturtle",
+  "author": "casey_jones",
   "platforms": [
     "macOS"
   ],

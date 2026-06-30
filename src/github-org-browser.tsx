@@ -1,4 +1,14 @@
-import { ActionPanel, Action, Cache, Detail, Icon, Image, List, getPreferenceValues, openExtensionPreferences } from "@raycast/api";
+import {
+  ActionPanel,
+  Action,
+  Cache,
+  Detail,
+  Icon,
+  Image,
+  List,
+  getPreferenceValues,
+  openExtensionPreferences,
+} from "@raycast/api";
 import { useFetch, usePromise } from "@raycast/utils";
 import { useState } from "react";
 
@@ -27,15 +37,20 @@ interface Repository {
   description: string | null;
   html_url: string;
   clone_url: string;
-  language: string | null;
+  open_issues_count: number;
   stargazers_count: number;
   forks_count: number;
   private: boolean;
 }
 
+interface RepositoryWithCounts extends Repository {
+  issues_count: number;
+  prs_count: number;
+}
+
 interface CacheEntry {
   timestamp: number;
-  data: Repository[];
+  data: RepositoryWithCounts[];
 }
 
 function getNextPageUrl(linkHeader: string | null): string | null {
@@ -44,6 +59,18 @@ function getNextPageUrl(linkHeader: string | null): string | null {
     const parts = link.split(";");
     const isNext = parts.some((part) => part.trim() === 'rel="next"');
     if (isNext) return parts[0].trim().slice(1, -1);
+  }
+  return null;
+}
+
+function getLastPageNumber(linkHeader: string | null): number | null {
+  if (!linkHeader) return null;
+  for (const link of linkHeader.split(",")) {
+    const parts = link.split(";");
+    if (parts.some((part) => part.trim() === 'rel="last"')) {
+      const page = new URL(parts[0].trim().slice(1, -1)).searchParams.get("page");
+      return page ? parseInt(page, 10) : null;
+    }
   }
   return null;
 }
@@ -63,6 +90,33 @@ async function fetchAllPages(url: string, headers: Record<string, string>): Prom
   }
 
   return results;
+}
+
+async function getPrCount(fullName: string, headers: Record<string, string>): Promise<number> {
+  const response = await fetch(`https://api.github.com/repos/${fullName}/pulls?state=open&per_page=1`, { headers });
+  if (!response.ok) return 0;
+  const lastPage = getLastPageNumber(response.headers.get("Link"));
+  if (lastPage !== null) return lastPage;
+  const data = await response.json();
+  return Array.isArray(data) ? data.length : 0;
+}
+
+async function enrichRepos(
+  repos: Repository[],
+  headers: Record<string, string>,
+  concurrency = 10,
+): Promise<RepositoryWithCounts[]> {
+  const all: RepositoryWithCounts[] = [];
+  for (let i = 0; i < repos.length; i += concurrency) {
+    const chunk = repos.slice(i, i + concurrency);
+    const prCounts = await Promise.all(chunk.map((r) => getPrCount(r.full_name, headers)));
+    for (let j = 0; j < chunk.length; j++) {
+      const repo = chunk[j];
+      const prs = prCounts[j];
+      all.push({ ...repo, prs_count: prs, issues_count: repo.open_issues_count - prs });
+    }
+  }
+  return all;
 }
 
 export default function Command() {
@@ -94,13 +148,17 @@ export default function Command() {
   }
 
   const isUserRepos = selectedOrg === USER_REPOS_KEY;
-  const activeTarget = isUserRepos ? (user?.login || "your") : selectedOrg;
+  const activeTarget = isUserRepos ? user?.login || "your" : selectedOrg;
   const cacheKey = `repos-${selectedOrg}`;
   const reposUrl = isUserRepos
     ? "https://api.github.com/user/repos?per_page=100&sort=updated&direction=desc&type=owner"
     : `https://api.github.com/orgs/${selectedOrg}/repos?per_page=100&sort=updated&direction=desc`;
 
-  const { isLoading: isReposLoading, data: repos, revalidate } = usePromise(
+  const {
+    isLoading: isReposLoading,
+    data: repos,
+    revalidate,
+  } = usePromise(
     async (key: string, url: string) => {
       const raw = cache.get(key);
       if (raw) {
@@ -109,13 +167,14 @@ export default function Command() {
           return entry.data;
         }
       }
-      const data = await fetchAllPages(url, headers);
+      const rawRepos = await fetchAllPages(url, headers);
+      const data = await enrichRepos(rawRepos, headers);
       const entry: CacheEntry = { timestamp: Date.now(), data };
       cache.set(key, JSON.stringify(entry));
       return data;
     },
     [cacheKey, reposUrl],
-    { initialData: [] as Repository[] },
+    { initialData: [] as RepositoryWithCounts[] },
   );
 
   function handleRefresh() {
@@ -157,7 +216,8 @@ export default function Command() {
           title={repo.name}
           subtitle={repo.description || ""}
           accessories={[
-            ...(repo.language ? [{ text: repo.language }] : []),
+            ...(repo.issues_count > 0 ? [{ icon: Icon.Bug, text: String(repo.issues_count) }] : []),
+            ...(repo.prs_count > 0 ? [{ icon: Icon.SpeechBubble, text: String(repo.prs_count) }] : []),
             ...(repo.stargazers_count > 0 ? [{ icon: Icon.Star, text: String(repo.stargazers_count) }] : []),
           ]}
           actions={
