@@ -9,8 +9,7 @@ import {
   getPreferenceValues,
   openExtensionPreferences,
 } from "@raycast/api";
-import { useFetch, usePromise } from "@raycast/utils";
-import { useState } from "react";
+import { useCachedState, useFetch, usePromise } from "@raycast/utils";
 
 const USER_REPOS_KEY = "__user__";
 const cache = new Cache();
@@ -121,7 +120,7 @@ async function enrichRepos(
 
 export default function Command() {
   const { token } = getPreferenceValues<Preferences>();
-  const [selectedOrg, setSelectedOrg] = useState(USER_REPOS_KEY);
+  const [selectedOrg, setSelectedOrg] = useCachedState("selected-org", USER_REPOS_KEY);
 
   const headers = { Authorization: `Bearer ${token}` };
 
