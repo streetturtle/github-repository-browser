@@ -126,11 +126,7 @@ export default function Command() {
 
   const { data: user } = useFetch<User>("https://api.github.com/user", { headers });
 
-  const {
-    data: orgs,
-    isLoading: isOrgsLoading,
-    error: orgsError,
-  } = useFetch<Organization[]>("https://api.github.com/user/orgs", { headers });
+  const { data: orgs, error: orgsError } = useFetch<Organization[]>("https://api.github.com/user/orgs", { headers });
 
   if (orgsError) {
     return (
@@ -147,11 +143,12 @@ export default function Command() {
   }
 
   const isUserRepos = selectedOrg === USER_REPOS_KEY;
-  const activeTarget = isUserRepos ? user?.login || "your" : selectedOrg;
   const cacheKey = `repos-${selectedOrg}`;
   const reposUrl = isUserRepos
     ? "https://api.github.com/user/repos?per_page=100&sort=updated&direction=desc&type=owner"
     : `https://api.github.com/orgs/${selectedOrg}/repos?per_page=100&sort=updated&direction=desc`;
+  const [cachedEntry, setCachedEntry] = useCachedState<CacheEntry | undefined>(cacheKey, undefined);
+  const staleRepos = cachedEntry?.data;
 
   const {
     isLoading: isReposLoading,
@@ -169,23 +166,23 @@ export default function Command() {
       const rawRepos = await fetchAllPages(url, headers);
       const data = await enrichRepos(rawRepos, headers);
       const entry: CacheEntry = { timestamp: Date.now(), data };
-      cache.set(key, JSON.stringify(entry));
+      setCachedEntry(entry);
       return data;
     },
     [cacheKey, reposUrl],
-    { initialData: [] as RepositoryWithCounts[] },
   );
 
   function handleRefresh() {
-    cache.remove(cacheKey);
+    if (cachedEntry) {
+      setCachedEntry({ ...cachedEntry, timestamp: 0 });
+    }
     revalidate();
   }
 
   return (
     <List
-      isLoading={isOrgsLoading || isReposLoading}
+      isLoading={isReposLoading && !repos && !staleRepos}
       throttle
-      navigationTitle={`${activeTarget} Repos`}
       searchBarPlaceholder="Search repositories..."
       searchBarAccessory={
         <List.Dropdown tooltip="Select repositories source" value={selectedOrg} onChange={setSelectedOrg}>
@@ -208,7 +205,7 @@ export default function Command() {
         </List.Dropdown>
       }
     >
-      {repos?.map((repo) => (
+      {(repos ?? staleRepos)?.map((repo) => (
         <List.Item
           key={repo.id}
           icon={repo.private ? Icon.Lock : Icon.LockUnlocked}

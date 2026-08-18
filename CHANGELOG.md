@@ -1,4 +1,8 @@
-# GitHub Org Browser Changelog
+# GitHub Repository Browser Changelog
+
+## [Improved Cache Refresh] - {PR_MERGE_DATE}
+
+- Keep stale repository data visible while refreshing the cache
 
 ## [Initial Version] - {PR_MERGE_DATE}
 
